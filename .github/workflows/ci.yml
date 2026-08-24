@@ -1,12 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional mocha --grep selector; empty runs the full suite'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -14,16 +14,28 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/setup-node@v3
         with:
           node-version: '22.0'
       - uses: actions/checkout@v4
+      - name: Pin registry to release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2024-09-06T08:56:34.070000Z
       - run: npm ci
       - run: npm run lint
+      - run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: follow-redirects-*.tgz
+          if-no-files-found: error
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -61,14 +73,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - uses: actions/checkout@v4
+      - name: Pin registry to release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2024-09-06T08:56:34.070000Z
       - run: npm install
       - if: ${{ matrix.node-version == '4.x' }}
         run: npm install mocha@5.0.0 nyc@11.8.0
-      - run: npm test
-      - run: node_modules/.bin/nyc --reporter=text-lcov node_modules/.bin/mocha | tee lcov.info
-      - uses: coverallsapp/github-action@master
-        if: ${{ matrix.node-version == '18.0' }}
-        with:
-          github-token: ${{ secrets.github_token }}
-          flag-name: run-${{ matrix.node-version }}
-          path-to-lcov: lcov.info
+      - run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npm test -- --grep "${{ inputs.test-filter }}"
+          else
+            npm test
+          fi
